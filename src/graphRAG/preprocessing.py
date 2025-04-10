@@ -169,7 +169,7 @@ async def generate_knowledge_graph(
         from_pdf=True,
     )
 
-    pdf_file_names = os.listdir(path)
+    pdf_file_names = list(filter(lambda x: x.endswith("pdf"), os.listdir(path)))
 
     # TODO: Limit the number of processed files to speed up process. This wil select the first 5 files as below:
     # pdf_file_names = [
