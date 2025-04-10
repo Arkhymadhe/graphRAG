@@ -28,10 +28,14 @@ __all__ = [
     "generate_entities_and_relationships"
 ]
 
-def extract_json_from_content(content):
-    start_index = content.index("{")
-    end_index = len(content) - content[::-1].index("}")
-    extracted_dict = json.loads(content[start_index : ])
+def extract_json_from_content(content: str):
+    start_index = content.index("```json")
+    end_index = len(content) - content[::-1].index("```")
+    new_content = content[start_index : end_index+1].strip().replace("```json", "").replace("```", "")
+
+    print(new_content)
+
+    extracted_dict = json.loads(new_content)
     return extracted_dict
 
 
@@ -129,18 +133,20 @@ async def generate_knowledge_graph(
     Extract the entities (nodes) and specify their type from the following Input text.
     Also extract the relationships between these nodes. the relationship direction goes from the start node to the end node. 
 
-    Return result as JSON using the following format:
+    Return result as a JSON object using the following format:
     {{"nodes": [ {{"id": "0", "label": "the type of entity", "properties": {{"name": "name of entity" }} }}],
       "relationships": [{{"type": "TYPE_OF_RELATIONSHIP", "start_node_id": "0", "end_node_id": "1", "properties": {{"details": "Description of the relationship"}} }}] }}
 
     - Use only the information from the Input text. Do not add any additional information.  
     - If the input text is empty, return an empty JSON.
+    - The JSON returned must be valid JSON.
     - Omit any backticks around the JSON - simply output the JSON on its own.
     - The JSON object must not wrapped into a list - it is its own JSON object.
-    - Property names must be enclosed in double quotes.
+    - The returned JSON object should have all internal keys and strings surrounded by double quotes.
+    - Eliminate the outer backticks (if any). Return the pure JSON. 
     - Make sure to create as many nodes and relationships as needed to offer rich medical context for further research.
     - An AI knowledge assistant must be able to read this graph and immediately understand the context to inform detailed research questions. 
-    - Multiple documents may be ingested from different sources and we are using this property graph to connect information, so make sure entity types are fairly general. 
+    - Multiple documents may be ingested from different sources and we are using this property graph to connect information, so make sure entity types are fairly general.
 
     Use only the following nodes and relationships (if provided):
     {schema}
@@ -149,7 +155,7 @@ async def generate_knowledge_graph(
     Do respect the source and target node types for relationship and
     the relationship direction.
 
-    Do not return any additional information other than the JSON in it.
+    I repeat: Do not return any additional information other than the JSON in it. Return the JSON and the JSON alone!
     """
     if generate_schema:
         entities, relations = load_entities_and_relationships()
@@ -169,7 +175,7 @@ async def generate_knowledge_graph(
         from_pdf=True,
     )
 
-    pdf_file_names = list(filter(lambda x: x.endswith("pdf"), os.listdir(path)))
+    pdf_file_names = [f for f in os.listdir(path) if f.endswith(".pdf")]
 
     # TODO: Limit the number of processed files to speed up process. This wil select the first 5 files as below:
     # pdf_file_names = [
@@ -275,3 +281,106 @@ if __name__ == "__main__":
 
     print(len(a))
     print(len(b))
+
+    text = """
+    Here is a structured approach to assign unique IDs and define relationships in the graph:
+
+### Node Assignments:
+1. ACCESS_GRANTED_BASED_ON
+2. AUTHORIZES
+3. DEFAULT_REQUEST_ACCESS_TO
+4. DEPLOYED_TO
+5. EquationalLaw
+6. ACCESSGranted (Assuming 'ACCESS_GRANTED' was a typo)
+7. AUTHORIZED_TO
+8. GAINS ACCESS TO
+9. ACCESS_GRANTED
+10. DEFAULT_REQUEST_ACCESS_TO
+11. DEPLOYED_TO
+12. EquationalLaw
+
+### Relationships:
+- **ACCESS_GRANTED_BASED_ON** → **AUTHORIZES**
+- **AUTHORIZES** → **GAINS ACCESS TO**
+- **DEPLOYED_TO** → **DEFAULT_REQUEST_ACCESS_TO**
+- **EquationalLaw** ↔ **EquationalLaw** (Identity node)
+- **ACCESSGranted** → **ACCESS_GRANTED**
+- **AUTHORIZED_TO** → **GAINS ACCESS TO**
+- **DEFAULT_REQUEST_ACCESS_TO** → **AUTHORIZES**
+- **DEPLOYED_TO** → **DEFAULT_REQUEST_ACCESS_TO**
+
+### Summary:
+Each node is assigned a unique ID, and relationships are defined based on their labels. This ensures clarity and accuracy in the graph structure.
+
+```json
+{
+  "nodes": [
+    {
+      "id": 1,
+      "label": "ACCESS_GRANTED_BASED_ON",
+      "description": "A node with the label ACCESS_GRANTED_BASED_ON."
+    },
+    {
+      "id": 2,
+      "label": "AUTHORIZES",
+      "description": "A node with the label AUTHORIZES."
+    },
+    {
+      "id": 3,
+      "label": "DEFAULT_REQUEST_ACCESS_TO",
+      "description": "A node with the label DEFAULT_REQUEST_ACCESS_TO."
+    },
+    {
+      "id": 4,
+      "label": "DEPLOYED_TO",
+      "description": "A node with the label DEPLOYED_TO."
+    },
+    {
+      "id": 5,
+      "label": "EquationalLaw",
+      "description": "A node with the label EquationalLaw."
+    },
+    {
+      "id": 6,
+      "label": "ACCESSGranted",
+      "description": "A node with the label ACCESSGranted (assuming a typo for ACCESS_GRANTED)."
+    },
+    {
+      "id": 7,
+      "label": "AUTHORIZES",
+      "description": "Another node with the label AUTHORIZES."
+    },
+    {
+      "id": 8,
+      "label": "GAINS ACCESS TO",
+      "description": "A node with the label GAINS ACCESS TO."
+    },
+    {
+      "id": 9,
+      "label": "ACCESS_GRANTED",
+      "description": "Another node with the label ACCESS_GRANTED."
+    },
+    {
+      "id": 10,
+      "label": "DEFAULT_REQUEST_ACCESS_TO",
+      "description": "Another node with the label DEFAULT_REQUEST_ACCESS_TO."
+    },
+    {
+      "id": 11,
+      "label": "DEPLOYED_TO",
+      "description": "Another node with the label DEPLOYED_TO."
+    },
+    {
+      "id": 12,
+      "label": "EquationalLaw",
+      "description": "Another node with the label EquationalLaw."
+    }
+  ]
+}
+```
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+LLM response has improper format for chunk_index=3
+    """
+
+    print(extract_json_from_content(text))

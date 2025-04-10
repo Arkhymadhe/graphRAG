@@ -1,44 +1,45 @@
 # -*- coding: utf-8 -*-
 
-import os
 import asyncio
-import json
-
 from colorama import Fore
 
 from neo4j import GraphDatabase
-from neo4j_graphrag.llm import OllamaLLM, OpenAILLM, VertexAILLM
-from neo4j_graphrag.embeddings import OllamaEmbeddings, OpenAIEmbeddings
+from neo4j_graphrag.llm import OllamaLLM, LLMResponse
+from neo4j_graphrag.embeddings import OllamaEmbeddings
 from neo4j_graphrag.generation import RagTemplate, GraphRAG
-
-from langchain_google_genai import (
-    ChatGoogleGenerativeAI,
-    HarmBlockThreshold,
-    HarmCategory,
-)
-from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
 
 from decouple import config
 from rich import print
 
 from preprocessing import (
-    generate_entities_and_relationships,
     generate_vector_retriever,
     generate_knowledge_graph,
+    postprocess_rag_completion,
+    extract_json_from_content,
 )
 
-NEO4J_CONNECTION_URI = config("NEO4J_CONNECTION_URI")
+NEO4J_CONNECTION_URI = config("LOCAL_NEO4J_CONNECTION_URI")
 NEO4J_USERNAME = config("NEO4J_USERNAME")
 NEO4J_PASSWORD = config("NEO4J_PASSWORD")
-CREATE_KG_GRAPH = False
-INIT_INDEX = False
+
+CREATE_KG_GRAPH = True
+GENERATE_SCHEMA = False
+INIT_VECTOR_INDEX = True
+
+print("="*100 + "\n" + "Connection Details:\n")
+
+print(f"NEO4J_CONNECTION_URI: {NEO4J_CONNECTION_URI}")
+print(f"NEO4J_USERNAME: {NEO4J_USERNAME}")
+print(f"NEO4J_PASSWORD: {NEO4J_PASSWORD}")
+
+print("="*100 + "\n")
 
 neo4j_driver = GraphDatabase.driver(
     NEO4J_CONNECTION_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD)
 )
 
 try:
-    print(neo4j_driver.verify_connectivity())
+    neo4j_driver.verify_connectivity()
     print("Connection successful!")
 except Exception as e:
     print(f"Failed to connect to Neo4j: {e}")
@@ -51,35 +52,51 @@ model_names = [
     "llama3.2:1b",
 ]
 
-model_name = model_names[0]
+model_name = model_names[1]
 document_path = "../../data/nist_cybersecurity_documents"
 vector_index_name = "vector_index"
-# vector_index_name = "vector"
+
 chunk_size = 200
 chunk_overlap = 20
+
 TOP_P = 0.9
-TEMPERATURE = 0.5
+TEMPERATURE = 0.1
 
 
-class SuperOllamaLLM(OllamaLLM):
+class GraphRAGOllamaLLM(OllamaLLM):
+    @staticmethod
+    def postprocess_response(response):
+        response_text = response.content.split("</think>")[-1].strip()
+        new_response = LLMResponse(content=response_text)
+
+        print("\n" + "+"*100)
+        print("[blue]" + response_text + "[/blue]")
+        print("+"*100 + "\n")
+        return new_response
+
     def invoke(self, input, message_history=None, system_instruction=None):
         response = super().invoke(
             input,
             message_history=message_history,
             system_instruction=system_instruction,
         )
-        response_text = response.content.split("</think>")[-1].strip()
-        resp = response.__class__
-        resp.content = response_text[7:-3]
-        return resp
+
+        return self.postprocess_response(response)
+
+    async def ainvoke(self, input, message_history=None, system_instruction=None):
+        response = await super().ainvoke(
+            input,
+            message_history=message_history,
+            system_instruction=system_instruction,
+        )
+
+        return self.postprocess_response(response)
 
 
 # TODO: Instantiate embedder_llm
 
-embedder_llm = OpenAILLM(
-    model_name="deepseek/deepseek-chat-v3-0324:free",
-    api_key=config("OPEN_ROUTER_DEEPSEEK_API_KEY"),
-    base_url="https://openrouter.ai/api/v1",
+knowledge_graph_llm = GraphRAGOllamaLLM(
+    model_name=model_name,
     model_params={
         "response_format": {"type": "json_object"},
         "temperature": TEMPERATURE,
@@ -102,7 +119,7 @@ if CREATE_KG_GRAPH:
     kg_graph = generate_knowledge_graph(
         path=document_path,
         embedder=embedder,
-        llm=embedder_llm,
+        llm=knowledge_graph_llm,
         driver=neo4j_driver,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
@@ -117,12 +134,12 @@ vector_retriever = generate_vector_retriever(
     index_name=vector_index_name,
     embedder=embedder,
     dimensions=num_dimensions,
-    init_index=INIT_INDEX,
+    init_vector_index=INIT_VECTOR_INDEX,
 )
 
 # TODO: Instantiate llm for RAG
 # 3. GraphRAG Class
-llm = OllamaLLM(
+graph_llm = GraphRAGOllamaLLM(
     model_name=model_name,
     model_params={
         "temperature": TEMPERATURE,
@@ -164,19 +181,7 @@ rag_template = RagTemplate(
 )
 
 # TODO: Instantiate GraphRAG instance
-rag = GraphRAG(llm=llm, retriever=vector_retriever, prompt_template=rag_template)
-
-
-def extract_json_from_content(content):
-    start_index = content.index("{")
-    end_index = content.index("}")
-    extracted_dict = json.loads(content[start_index : end_index + 1])
-    return extracted_dict
-
-
-def postprocess_rag_completion(completion):
-    completion = completion.answer.split("</think>")[-1].strip()
-    return completion
+rag = GraphRAG(llm=graph_llm, retriever=vector_retriever, prompt_template=rag_template)
 
 
 # 4. Run
@@ -220,3 +225,18 @@ if __name__ == "__main__":
     # for i in vector_res.records:
     #     print("===="*20 + "\n")
     #     print("[bold red]" + json.dumps(i.data(), indent=4) + "[/bold red]")
+
+    # user_prompt  = """
+    # Generate a JSON object detailing the biometrics of Napoleon Bonaparte. The expected keys are: date_of_birth,
+    # data_of_death, battles_won, and battles_lost. Take note of the following:
+    #
+    # - The returned JSON object should have all internal keys and strings surrounded by double quotes.
+    # - Eliminate the outer backticks (if any). Return the pure JSON.
+    # """
+    #
+    # response = asyncio.run(knowledge_graph_llm.ainvoke(user_prompt))
+    #
+    # print(response.content)
+    # import json
+    # json_response = json.loads(response.content.split("</think>")[1].strip())
+    # print(json_response)

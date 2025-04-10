@@ -18,15 +18,15 @@ from preprocessing import (
     extract_json_from_content,
 )
 
-NEO4J_CONNECTION_URI = config("AURA_NEO4J_CONNECTION_URI") # TODO: Should be AURA URI. Be sure to restore this once done.
+NEO4J_CONNECTION_URI = config("LOCAL_NEO4J_CONNECTION_URI") # TODO: Should be AURA URI. Be sure to restore this once done.
 NEO4J_USERNAME = config("NEO4J_USERNAME")
 NEO4J_PASSWORD = config("NEO4J_PASSWORD")
 OPENROUTER_DEEPSEEK_API_KEY = config("OPENROUTER_DEEPSEEK_API_KEY")
 OPENROUTER_BASE_URL = config("OPENROUTER_BASE_URL")
 
-CREATE_KG_GRAPH = False
-GENERATE_SCHEMA = False
-INIT_VECTOR_INDEX = False
+CREATE_KG_GRAPH = True
+GENERATE_SCHEMA = True
+INIT_VECTOR_INDEX = True
 
 neo4j_driver = GraphDatabase.driver(
     NEO4J_CONNECTION_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD)
@@ -36,7 +36,7 @@ try:
     neo4j_driver.verify_connectivity()
     print("[green]Connection successful![/green]")
 except Exception as e:
-    print(f"[red]Failed to connect to Neo4j: {e}[/red]")
+    print(f"Failed to connect to Neo4j: {e}")
 
 model_names = [
     "deepseek-r1:7b",
@@ -58,16 +58,15 @@ open_router_model_names = [
 ]
 
 knowledge_graph_model_name = model_names[0]
-# TODO: Use a model that matches the graph embedding dimensions online (i.e., 384)
-embedder_model_name = "tazarov/all-minilm-l6-v2-f32"
+embedder_model_name = model_names[1]
 
 open_router_model_name = open_router_model_names[1]
 
 document_path = "../../data/nist_cybersecurity_documents"
-vector_index_name = "vector" # TODO: Use in-built vector index on Neo4J graph builder
+vector_index_name = "vector_index"
+# vector_index_name = "vector"
 chunk_size = 200
 chunk_overlap = 20
-
 TOP_P = 0.9
 TEMPERATURE = 0.5
 
@@ -82,6 +81,9 @@ class GraphRAGOllamaLLM(OllamaLLM):
 
         new_response = LLMResponse(content=response_text)
 
+        print("\n" + "+"*100)
+        print("[blue]" + response_text + "[/blue]")
+        print("+"*100 + "\n")
         return new_response
 
     def invoke(self, input, message_history=None, system_instruction=None):
@@ -113,6 +115,17 @@ knowledge_graph_llm = GraphRAGOllamaLLM(
         "top_p": TOP_P,
     },
 )
+
+# knowledge_graph_llm = OpenAILLM(
+#     model_name=open_router_model_name,
+#     api_key=OPENROUTER_DEEPSEEK_API_KEY,
+#     base_url=OPENROUTER_BASE_URL,
+#     model_params={
+#         "response_format": {"type": "json_object"},
+#         "temperature": TEMPERATURE,
+#         "top_p": TOP_P,
+#     },
+# )
 
 # TODO: Instantiate embedder
 
@@ -158,6 +171,16 @@ graph_llm = GraphRAGOllamaLLM(
     },
 )
 
+# graph_llm = OpenAILLM(
+#     model_name=open_router_model_name,
+#     api_key=OPENROUTER_DEEPSEEK_API_KEY,
+#     base_url=OPENROUTER_BASE_URL,
+#     model_params={
+#         "temperature": TEMPERATURE,
+#         "top_p": TOP_P,
+#     },
+# )
+
 # TODO: Instantiate RAG text template
 
 rag_template_text = """
@@ -188,32 +211,41 @@ rag = GraphRAG(llm=graph_llm, retriever=vector_retriever, prompt_template=rag_te
 # 4. Run
 
 if __name__ == "__main__":
-    user_prompt = '''
-    Return a numbered list of all individual authors/contributors to the NIST cybersecurity documents. Provide references from your context.
-    '''
+    # user_prompt = '''
+    # Return a numbered list of all individual authors/contributors to the NIST cybersecurity documents.
+    # '''
 
-    response = rag.search(user_prompt, return_context=True)
-    retriever_results = response.retriever_result
-    retriever_results = [(r.metadata['score'], r.content[9:-2]) for r in retriever_results.items]
-    retriever_results = sorted(retriever_results, key=lambda x: x[0])
+    # user_prompt = '''
+    # Could you help with a highlight of what cybersecurity topics you know? Also, provide direct quotes and references for your sources.
+    # '''
 
-    # Extract context used to generate answers
-    tab = "\t"*5
-    context = [f"\n{tab}Context #{i} (Relevance score: {float(score)*100: .4f} %) \n\n{context}" for i, (score, context) in enumerate(retriever_results, 1)]
-    context = "\n".join(context)
+    # user_prompt = '''
+    # Provide me with a numbered list of articles The MITRE Corporation is associated with.
+    # '''
 
-    # Process RAG response
-    response = postprocess_rag_completion(response)
+    user_prompt = """
+    Do you know anything about disco music?
+    """
 
-    separator = "\n\n" + "+"*100 + "\n\n"
+    vector = embedder.embed_query(user_prompt)
+    print(f"Length of vector: {len(vector)}")
+    #
+    # # exit()
+    # response = rag.search(user_prompt)
+    # response = postprocess_rag_completion(response)
+    #
+    # print(Fore.BLUE + ">>> User")
+    # print(Fore.BLUE + f"{user_prompt}\n\n")
+    #
+    # print(Fore.MAGENTA + ">>> Response")
+    # print(Fore.MAGENTA + f"{response}\n\n" + Fore.RESET)
 
-    # Print out user input and RAG response
+    # TODO: Not showing retrieved results. Fix bug.
 
-    print("[blue]>>> User:[/blue]")
-    print(f"[blue]{user_prompt}[/blue]\n")
-
-    print("[magenta]>>>> Response:[/magenta]")
-    print(f"[magenta]{response}{separator}[green]{context}[/green]\n\n[/magenta]")
-
-    # TODO: Not showing retrieved results. Fix bug. UPDATE: Bug fixed!
-
+    vector_res = vector_retriever.get_search_results(
+        query_text=user_prompt,
+        top_k=3
+    )
+    for i in vector_res.records:
+        print("===="*20 + "\n")
+        print("[bold red]" + json.dumps(i.data(), indent=4) + "[/bold red]")
