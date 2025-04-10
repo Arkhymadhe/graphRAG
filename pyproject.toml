@@ -7,9 +7,11 @@ requires-python = ">=3.11"
 dependencies = [
     'accelerate==1.5.2',
     'black>=25.1.0',
+    'chromadb==1.0.3',
     'colorama==0.4.6',
     'datasets==3.5.0',
     'python-decouple==3.8',
+    'langchain-chroma==0.2.2',
     'langchain-community>=0.3.19',
     'langchain-core>=0.3.43',
     'langchain-google-community>=2.0.7',
@@ -21,6 +23,7 @@ dependencies = [
     'loguru==0.7.3',
     'matplotlib>3.5',
     'neo4j==5.28.1',
+    'neo4j-rust-ext==5.28.1.0',
     'neo4j-graphrag==1.6.1',
     'ollama==0.4.7',
     'peft==0.15.1',
@@ -29,6 +32,7 @@ dependencies = [
     'torch>=2.6.0',
     'torchinfo==1.8.0',
     'torchvision>=0.21',
-    'transformers==4.51.0'
+    'transformers==4.51.0',
+    'unstructured==0.17.2'
 ]
 
